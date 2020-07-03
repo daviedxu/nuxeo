@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component name="org.nuxeo.ecm.platform.restapi.server.batch.upload.test">
+
+  <documentation>
+    This parameter allows enabling multipart file upload. Since Streaming is now the way to go. You can
+    disable multipart handling here.
+
+    @author Nour AL KOTOB (nalkotob@nuxeo.com)
+  </documentation>
+  <extension target="org.nuxeo.runtime.ConfigurationService" point="configuration">
+    <property name="nuxeo.batch.upload.multipart.disabled">false</property>
+  </extension>
+
+</component>
