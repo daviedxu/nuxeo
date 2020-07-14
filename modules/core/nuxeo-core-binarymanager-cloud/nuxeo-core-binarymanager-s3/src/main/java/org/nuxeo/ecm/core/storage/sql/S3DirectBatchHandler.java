@@ -40,6 +40,7 @@ import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -78,7 +79,9 @@ public class S3DirectBatchHandler extends AbstractBatchHandler {
 
     private static final Log log = LogFactory.getLog(S3DirectBatchHandler.class);
 
-    // properties passed at initialization time from extension point
+    protected static final Pattern REGEX_MULTIPART_ETAG = Pattern.compile("-\\d+$");
+
+    // properties passedds at initialization time from extension point
 
     /** @deprecated since 11.1, use {@link S3BinaryManager#ACCELERATE_MODE_PROPERTY} */
     @Deprecated
@@ -246,6 +249,7 @@ public class S3DirectBatchHandler extends AbstractBatchHandler {
         String fileKey = fileInfo.getKey();
         ObjectMetadata metadata = amazonS3.getObjectMetadata(bucket, fileKey);
         String key = metadata.getETag();
+        String md5 = metadata.getContentMD5();
         if (isEmpty(key)) {
             return false;
         }
@@ -277,6 +281,26 @@ public class S3DirectBatchHandler extends AbstractBatchHandler {
         }
 
         ObjectMetadata newMetadata = amazonS3.getObjectMetadata(bucket, bucketKey);
+
+        // if we did a multipart upload but can do a non multipart copy we can get back the digest as key
+        boolean isMultipartUpload = REGEX_MULTIPART_ETAG.matcher(key).find();
+        boolean canDoNonMultipartCopy = newMetadata.getContentLength() < getTransferManager().getConfiguration()
+                                                                                             .getMultipartCopyThreshold();
+        if (isMultipartUpload && canDoNonMultipartCopy) {
+            key = newMetadata.getETag();
+            String previousBucketKey = bucketKey;
+            bucketKey = bucketPrefix + key;
+            CopyObjectRequest renameRequest = new CopyObjectRequest(bucket, previousBucketKey, bucket, bucketKey);
+            Copy rename = getTransferManager().copy(renameRequest);
+            try {
+                rename.waitForCompletion();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new NuxeoException(e);
+            } finally {
+                amazonS3.deleteObject(bucket, previousBucketKey);
+            }
+         }
 
         blobInfo.key = key;
         blobInfo.digest = defaultString(newMetadata.getContentMD5(), key);
